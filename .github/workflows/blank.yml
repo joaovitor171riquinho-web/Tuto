@@ -1,0 +1,217 @@
+name: AnDos PC VIRTUAL
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance_number:
+        description: "Instance"
+        required: true
+        default: "1"
+
+jobs:
+  deploy:
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    steps:
+
+    - name: Windows Interface
+      shell: pwsh
+      run: |
+        $a="HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
+        New-Item $a -Force | Out-Null
+
+        # Botão Iniciar à esquerda
+        Set-ItemProperty $a TaskbarAl 0 -ErrorAction SilentlyContinue
+
+        # Wallpaper do próprio Windows
+        $w=Get-ChildItem "C:\Windows\Web" -Recurse -Include *.jpg,*.jpeg,*.png -ErrorAction SilentlyContinue |
+          Select-Object -First 1
+
+        if($w){
+          Set-ItemProperty `
+            "HKCU:\Control Panel\Desktop" `
+            Wallpaper `
+            $w.FullName
+
+          Add-Type @"
+        using System.Runtime.InteropServices;
+        public class Wallpaper {
+          [DllImport("user32.dll")]
+          public static extern int SystemParametersInfo(
+            int a,int b,string c,int d);
+        }
+        "@
+
+          [Wallpaper]::SystemParametersInfo(
+            20,0,$w.FullName,3
+          )
+        }
+
+        # Remover Unity Hub
+        Get-Process -Name "Unity Hub" `
+          -ErrorAction SilentlyContinue |
+          Stop-Process -Force -ErrorAction SilentlyContinue
+
+        Remove-Item `
+          "$env:LOCALAPPDATA\Programs\Unity Hub" `
+          -Recurse `
+          -Force `
+          -ErrorAction SilentlyContinue
+
+        # Reiniciar Explorer corretamente
+        Get-Process explorer `
+          -ErrorAction SilentlyContinue |
+          Stop-Process -Force -ErrorAction SilentlyContinue
+
+        Start-Sleep -Seconds 2
+
+        Start-Process explorer.exe
+
+    - name: Enable RDP
+      shell: pwsh
+      run: |
+        Set-ItemProperty `
+          "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
+          fDenyTSConnections 0
+
+        Enable-NetFirewallRule `
+          -DisplayGroup "Remote Desktop"
+
+    - name: Create RDP User
+      shell: pwsh
+      env:
+        PASS: ${{ secrets.RDP_PASSWORD }}
+      run: |
+        if([string]::IsNullOrWhiteSpace($env:PASS)){
+          throw "Configure o Secret RDP_PASSWORD."
+        }
+
+        $p=ConvertTo-SecureString `
+          $env:PASS `
+          -AsPlainText `
+          -Force
+
+        $u=Get-LocalUser `
+          -Name runneradmin `
+          -ErrorAction SilentlyContinue
+
+        if(!$u){
+          New-LocalUser `
+            -Name runneradmin `
+            -Password $p `
+            -PasswordNeverExpires
+        }
+        else{
+          Set-LocalUser `
+            -Name runneradmin `
+            -Password $p
+        }
+
+        Add-LocalGroupMember `
+          -Group "Remote Desktop Users" `
+          -Member runneradmin `
+          -ErrorAction SilentlyContinue
+
+    - name: Install Tailscale
+      shell: pwsh
+      run: |
+        $i="$env:TEMP\ts.msi"
+
+        Invoke-WebRequest `
+          "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" `
+          -OutFile $i
+
+        Start-Process `
+          msiexec.exe `
+          -ArgumentList "/i `"$i`" /quiet /norestart" `
+          -Wait
+
+        Remove-Item $i -Force
+
+    - name: Connect Tailscale
+      shell: pwsh
+      env:
+        KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+      run: |
+        if([string]::IsNullOrWhiteSpace($env:KEY)){
+          throw "Configure o Secret TAILSCALE_AUTH_KEY."
+        }
+
+        $ts="C:\Program Files\Tailscale\tailscale.exe"
+
+        & $ts up `
+          --authkey="$env:KEY" `
+          --hostname="andos-${{ github.run_id }}"
+
+        Start-Sleep -Seconds 10
+
+        $ip=(& $ts ip -4 | Select-Object -First 1).Trim()
+
+        if(!$ip){
+          throw "Não foi possível obter o IP Tailscale."
+        }
+
+        "IP=$ip" >> $env:GITHUB_ENV
+
+        Write-Host ""
+        Write-Host "============================"
+        Write-Host "     AnDos PC VIRTUAL"
+        Write-Host "============================"
+        Write-Host "IP: $ip"
+        Write-Host "USER: runneradmin"
+        Write-Host "PORT: 3389"
+        Write-Host "============================"
+
+    - name: Install Steam
+      shell: pwsh
+      run: |
+        $i="$env:TEMP\SteamSetup.exe"
+
+        Invoke-WebRequest `
+          "https://cdn.cloudflare.steamstatic.com/client/installer/SteamSetup.exe" `
+          -OutFile $i
+
+        Start-Process `
+          $i `
+          -ArgumentList "/S" `
+          -Wait
+
+        Remove-Item $i -Force
+
+        Write-Host "Steam instalado."
+
+    - name: Install Chrome
+      shell: pwsh
+      run: |
+        $i="$env:TEMP\chrome.exe"
+
+        Invoke-WebRequest `
+          "https://dl.google.com/chrome/install/latest/chrome_installer.exe" `
+          -OutFile $i
+
+        Start-Process `
+          $i `
+          -ArgumentList "/silent /install" `
+          -Wait
+
+        Remove-Item $i -Force
+
+        Write-Host "Chrome instalado."
+
+    - name: Keep Alive
+      shell: pwsh
+      run: |
+        Write-Host ""
+        Write-Host "============================"
+        Write-Host " AnDos PC VIRTUAL ATIVO"
+        Write-Host " Steam: OK"
+        Write-Host " Chrome: OK"
+        Write-Host " Unity Hub: REMOVIDO"
+        Write-Host "============================"
+        Write-Host ""
+
+        while($true){
+          Write-Host "PC ativo - $(Get-Date)"
+          Start-Sleep -Seconds 60
+        }
