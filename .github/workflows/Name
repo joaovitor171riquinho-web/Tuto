@@ -1,0 +1,85 @@
+name: Windows Performance Environment
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: 👥 Criar Usuário Exclusivo de Testes
+        shell: pwsh
+        run: |
+          Write-Host "Criando usuario exclusivo..." -ForegroundColor Green
+          $Password = ConvertTo-SecureString "Senha123!" -AsPlainText -Force
+          New-LocalUser -Name "jogos" -Password $Password -Description "Usuario de Desempenho" -FullName "Jogador"
+          Add-LocalGroupMember -Group "Administrators" -Member "jogos"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "jogos"
+
+      - name: 🔒 Configurar e Liberar RDP Seguro
+        shell: pwsh
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0
+
+      - name: 🚀 Tweaks de Desempenho Extremo e Redução de Lag
+        shell: pwsh
+        run: |
+          Write-Host "Otimizando recursos do sistema para resposta rapida..." -ForegroundColor Green
+          
+          # Ativa plano de energia de Alto Desempenho
+          powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+          
+          $RdpKey = 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
+          
+          # Força FPS mais alto (60 FPS) e menor qualidade de cor (16-bit) para economizar banda e reduzir lag
+          New-ItemProperty -Path $RdpKey -Name "BPP" -Value 16 -PropertyType DWORD -Force
+          New-ItemProperty -Path $RdpKey -Name "MinFrameRate" -Value 60 -PropertyType DWORD -Force
+          
+          # Desativa compressão visual pesada e força foco em desempenho de rede no RDP
+          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "MinEncryptionLevel" -Value 1 -ErrorAction SilentlyContinue
+          
+          # Desativa efeitos visuais do Windows (Animações, Sombras, Fontes suavizadas)
+          Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects' -Name "VisualFXSetting" -Value 2
+          
+          # Desativa serviços de telemetria em segundo plano que consomem CPU
+          Set-Service -Name "DiagTrack" -StartupType Disabled -ErrorAction SilentlyContinue
+          Set-Service -Name "dmwappushservice" -StartupType Disabled -ErrorAction SilentlyContinue
+          
+          # Ajusta prioridade de processamento para tarefas em primeiro plano
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\PriorityControl' -Name "Win32PrioritySeparation" -Value 38
+
+      - name: 🌐 Instalar e Conectar o Tailscale via Chocolatey
+        shell: pwsh
+        run: |
+          Write-Host "Instalando Tailscale..." -ForegroundColor Green
+          choco install tailscale -y --no-progress
+          Start-Sleep -Seconds 5
+          
+          Write-Host "Conectando ao Tailscale..." -ForegroundColor Green
+          & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=win10-perf-pc --accept-routes
+          
+          Write-Host "IP da sua Máquina Virtual Windows:" -ForegroundColor Cyan
+          & "C:\Program Files\Tailscale\tailscale.exe" ip -4
+
+      - name: 🟢 Manter a Sessão Ativa para Validação
+        shell: pwsh
+        run: |
+          Write-Host "==========================================================" -ForegroundColor Green
+          Write-Host "Ambiente Windows Otimizado Pronto!" -ForegroundColor Green
+          Write-Host "CREDENCIAIS NO WINDOWS APP / RDP:" -ForegroundColor Yellow
+          Write-Host "Usuario: jogos" -ForegroundColor Cyan
+          Write-Host "Senha: Senha123!" -ForegroundColor Cyan
+          Write-Host "==========================================================" -ForegroundColor Green
+          
+          # Mantém a execução ativa por até 3 horas para testes e análises de desempenho
+          $i = 0
+          while ($i -lt 180) {
+              Start-Sleep -Seconds 60
+              $i++
+          }
